@@ -1,19 +1,16 @@
 # MPP Tracking
 
-import sys
 import time
 import logging
 
 from pymeasure.log import console_log
-from pymeasure.instruments.keithley import Keithley2400
 from pymeasure.experiment import (
-    Parameter,
     BooleanParameter,
     FloatParameter,
     IntegerParameter
 ) 
 
-from .keithley2400_procedure import Keithley2400_Procedure
+from keithley2400_procedure import Keithley2400_Procedure
 
 
 # setup logging
@@ -25,14 +22,16 @@ console_log( log, level = log_level )
 log.debug( 'Debug logging enabled.' )
 
 
-class MPPTracking_Procedure( SKeithley2400_Procedure ):
+class MPPTracking_Procedure( Keithley2400_Procedure ):
     """
     Procedure for basic step and probe MPP tracking.
 
+    Output: [ time, voltage, current, power ]
+
     :param run_time: Run time [min]. [Default: 60]
-    :param probe_step: Probe step size [V]. [Default: 10]
+    :param probe_step: Probe step size [V]. [Default: 0.01]
     :param voltage_range:  Voltage range [V]. [Default: None]
-    :param compliance_current: Compliance current, maximum allowed current [mA]. [Default: 5]
+    :param compliance_current: Compliance current, maximum allowed current [A]. [Default: 0.05]
     :param initial_voltage: Starting voltage [V]. [Default: 0]
     :param buffer_points: Number of measurements to average over for each data point. [Default: 10]
     :param probe_points: Number of points to collect during probe. [Default: 3]
@@ -41,26 +40,22 @@ class MPPTracking_Procedure( SKeithley2400_Procedure ):
     :param power_production_mode: If True positive power is produced, negative power is consumed.
         If False negative power is produced, positive power is consumed.
         [Default: False]
-    :param use_front_terminals: If True front terminals are used.
-        If False rear terminals are used.
-        [Default: True]
     """
 
     # mpp parameters
     run_time            = FloatParameter( 'Run time',           units = 'min',  default = 60 )  # run time in minutes.
-    probe_step          = FloatParameter( 'Probe step',         units = 'mV',   default = 10 )    # voltage step for probing in mV.
+    probe_step          = FloatParameter( 'Probe step',         units = 'V',    default = 0.010 )    # voltage step for probing in V.
     voltage_range       = FloatParameter( 'Voltage range',      units = 'V',    default = 2 )
-    compliance_current  = FloatParameter( 'Compliance current', units = 'mA',   default = 5 )  # maximum current to apply in mA.
+    compliance_current  = FloatParameter( 'Compliance current', units = 'A',    default = 0.05 )  # maximum current to apply.
     initial_voltage     = FloatParameter( 'Initial_voltage',    units = 'V',    default = 0 )
     buffer_points       = IntegerParameter( 'Buffer points',                    default = 10 )  # number of measurements for each data point.
     probe_points        = IntegerParameter( 'Probe points',                     default = 3 )  # number of data points to collect for probe.
     probe_interval      = IntegerParameter( 'Probe interval',    units = 's',   default = 60 )  # seconds between probes.
     data_interval       = IntegerParameter( 'Data interval',     units = 's',   default = 10 )  # seconds between data points.
-    power_prodution_mode = BooleanParameter( 'Power production mode',           default = False )  # is power production or consumption beign measured?
-    use_front_terminals  = BooleanParameter( 'Use front terminals',             default = True )
+    power_production_mode = BooleanParameter( 'Power production mode',          default = False )  # is power production or consumption beign measured?
 
     DATA_COLUMNS = [
-        'time', 'voltage [V]', 'current [A]', 'power [W]'
+        'time [s]', 'voltage [V]', 'current [A]', 'power [W]'
     ]
 
 
@@ -146,29 +141,14 @@ class MPPTracking_Procedure( SKeithley2400_Procedure ):
         """
         super().startup()
 
-        # convert probe step from mV to V
-        self.probe_step /= 1e3
-
-        log.debug( 'Connecting and configuring the instrument.' )
-        self.__instrument = Keithley2400( self.port )
-        self.instrument.reset()  # apply voltage, measure current
         self.instrument.apply_voltage(
             voltage_range = self.voltage_range,
-            compliance_current = self.compliance_current/ 1e3  # convert from mA to A
+            compliance_current = self.compliance_current
         )
 
         # set elements
         log.debug( 'Setting elements.' )
-        self.instrument.write( ':format:elements volt,curr' )
-        self.__elements = self._get_elements()
-
-        # set terminals
-        log.debug( 'Setting terminals.' )
-        if self.use_front_terminals:
-            self.instrument.use_front_terminals()
-        
-        else:
-            self.instrument.use_rear_terminals()
+        self.set_elements( [ 'time', 'voltage', 'current' ] )
 
         time.sleep( 0.1 )  # wait to give instrument time to react
 
@@ -192,17 +172,21 @@ class MPPTracking_Procedure( SKeithley2400_Procedure ):
             probe_data = self._probe( probe_direction )  # leaves voltage at probe voltage
             better_voltage = self._better_voltage( baseline_data, probe_data )
 
-            if better_voltage == baseline_data[ 0 ]:
+            baseline_voltage = baseline_data[ 0 ]
+            if better_voltage == baseline_voltage:
                 # baseline voltage is better
                 # try to probe in other direction
                 # reset voltage to baseline
                 probe_direction *= -1
-                self.instrument.source_voltage += baseline_voltage
+                self.instrument.source_voltage = baseline_voltage
                 log.debug( f'Original voltage was better. Returning to {baseline_voltage} V' )
 
             else:
                 # probe voltage is better
+                # do not need to adjust voltage, as the probe step already set it.
                 log.debug( f'Probe voltage is better. New set point is {probe_data[ 0 ]} V.' )
+
+        log.info( 'Experiment complete.' )
 
 
     def _baseline( self ):
@@ -229,7 +213,7 @@ class MPPTracking_Procedure( SKeithley2400_Procedure ):
             powers.append( datum[ 'power' ] )
 
             # wait for next measurement
-            self._wait_for(
+            self.wait_for(
                 self._time_remaining(
                     cycle_start,
                     self.data_interval
@@ -263,7 +247,7 @@ class MPPTracking_Procedure( SKeithley2400_Procedure ):
             powers.append( datum[ 'power' ] )
 
             # wait for next measurement
-            self._wait_for(
+            self.wait_for(
                 self._time_remaining(
                     cycle_start,
                     self.data_interval
@@ -293,7 +277,7 @@ class MPPTracking_Procedure( SKeithley2400_Procedure ):
         m1 = sum( p1[ -num_points: ] )
         m2 = sum( p2[ -num_points: ] )
 
-        if not self.power_prodution_mode:
+        if not self.power_production_mode:
             # power consumption is measured
             # power production is negative
             m1 *= -1
@@ -322,22 +306,25 @@ class MPPTracking_Procedure( SKeithley2400_Procedure ):
         data = self._measure()
 
         # take mean over collected data
-        means = data.mean( axis = 0 )
+        means   = data.mean( axis = 0 )
+        
+        m_time  = means[ self.elements.index( 'TIME' ) ]
+        time = self.time_elapsed - m_time  # adjust time for measurement
+        
         voltage = means[ self.elements.index( 'VOLT' ) ]
         current = means[ self.elements.index( 'CURR' ) ]
-        power = data.prod( axis = 1 ).mean()
+        power   = data.prod( axis = 1 ).mean()
 
         # save results
-        m_time = self.time_elapsed
         self.emit( 'results', {
-            'time':        m_time,
+            'time [s]':    time,
             'voltage [V]': voltage,
             'current [A]': current,
             'power [W]':   power
         } )
 
         return {
-            'time':    m_time,
+            'time':    time,
             'voltage': voltage,
             'current': current,
             'power':   power
@@ -357,7 +344,7 @@ class MPPTracking_Procedure( SKeithley2400_Procedure ):
         self.instrument.wait_for_buffer()
 
         data = self.instrument.buffer_data
-        data = self._format_data( data )
+        data = self.format_data( data )
         return data
 
 
@@ -368,24 +355,7 @@ class MPPTracking_Procedure( SKeithley2400_Procedure ):
         :param start: Start time.
         :param interval: Desired interval.
         """
+        log.debug( '#_time_remaining' )
+
         elapsed = ( time.time() - start )
         return ( interval - elapsed )
-
-
-    def _wait_for( self, seconds, interval = 1 ):
-        """
-        Sleep for given number of seconds.
-        Used to intercept interupts.
-        
-        :param seconds: Number of seconds to sleep for.
-        :param interval: Interval to check for an interupt.
-        """
-        end = time.time() + seconds
-        while time.time() < end:
-            if self.should_stop():
-                # user canceled
-                log.info( 'Procedure stopped by user.' )
-                self.shutdown()
-                break
-
-            time.sleep( interval )

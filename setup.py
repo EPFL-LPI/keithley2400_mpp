@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="kiethley_2400_mpp",
+    name="keithley2400_mpp",
     version="0.0.1",
     author="Brian Carlsen",
     author_email="carlsen.bri@gmail.com",
