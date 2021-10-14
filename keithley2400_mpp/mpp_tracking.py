@@ -10,7 +10,7 @@ from pymeasure.experiment import (
     IntegerParameter
 ) 
 
-from keithley2400_procedure import Keithley2400_Procedure
+from .keithley2400_procedure import Keithley2400_Procedure
 
 
 # setup logging

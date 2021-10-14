@@ -1,21 +1,18 @@
-import time
-import logging
-
-from pymeasure.log import console_log
-from pymeasure.experiment import Results, Worker
-
-
 def main( port, run_voc = True, run_jv = True, run_mpp = True, **kwargs ):
 	"""
 
 	"""
 	import math
+	import time
+	import logging
 
 	import pandas as pd
+	from pymeasure.log import console_log
+	from pymeasure.experiment import Results, Worker
 
-	from voc import Voc_Procedure
-	from jv import JVScan_Procedure
-	from mpp_tracking import MPPTracking_Procedure
+	from keithley2400_mpp.voc import Voc_Procedure
+	from keithley2400_mpp.jv import JVScan_Procedure
+	from keithley2400_mpp.mpp_tracking import MPPTracking_Procedure
 
 
 	# setup logging
@@ -32,6 +29,10 @@ def main( port, run_voc = True, run_jv = True, run_mpp = True, **kwargs ):
 	if 'use_front_terminals' in kwargs:
 		use_front_terminals = kwargs[ 'use_front_terminals' ]
 
+	recorder_args = {
+		'maxBytes': 1024,
+		'backupCount': 10
+	}
 
 	# --- setup voc ---
 	log.debug( 'Initializing Voc procedure.' )
@@ -78,10 +79,12 @@ def main( port, run_voc = True, run_jv = True, run_mpp = True, **kwargs ):
 	mpp_proc.probe_points	= 3
 	mpp_proc.probe_interval = 15
 	mpp_proc.data_interval 	= 3
+	
+	# If True positive power is produced, negative power is consumed.
+ 	# If False negative power is produced, positive power is consumed.
 	mpp_proc.power_production_mode = False
 
 	mpp_data_filename = 'mpp.csv'
-	max_file_size = 1e-3
 
 	# --- run procedures ---
 
@@ -89,7 +92,7 @@ def main( port, run_voc = True, run_jv = True, run_mpp = True, **kwargs ):
 	# Voc
 	if run_voc:
 		log.info( 'Starting Voc.' )
-		voc_results = Results( voc_proc, voc_data_filename )
+		voc_results = Results( voc_proc, voc_data_filename, recorder_args = recorder_args )
 		voc = Worker( voc_results )
 
 		voc.start()
@@ -119,7 +122,7 @@ def main( port, run_voc = True, run_jv = True, run_mpp = True, **kwargs ):
 			jv_run_time *= 2
 
 		log.info( 'Starting JV scan.' )
-		jv_results = Results( jv_proc, jv_data_filename )
+		jv_results = Results( jv_proc, jv_data_filename, recorder_args = recorder_args )
 		jv = Worker( jv_results )
 
 		jv.start()
@@ -142,8 +145,7 @@ def main( port, run_voc = True, run_jv = True, run_mpp = True, **kwargs ):
 	# MPP
 	if run_mpp:
 		log.info( 'Starting MPP tracking.' )
-		mpp_results = Results( mpp_proc, mpp_data_filename )
-		# mpp_results.MAX_FILE_SIZE = max_file_size
+		mpp_results = Results( mpp_proc, mpp_data_filename, recorder_args = recorder_args )
 
 		mpp = Worker( mpp_results )
 		mpp.start()
@@ -158,6 +160,6 @@ if __name__ == '__main__':
 		port = port,
 		run_voc = True,
 		run_jv  = True,
-		run_mpp = True,
+		run_mpp = False,
 		use_front_terminals = use_front_terminals
 	)
